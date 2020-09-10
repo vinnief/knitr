@@ -38,7 +38,7 @@ call_block = function(block) {
     )
     if (!params$eval) return('')
     cmds = lapply(sc_split(params$child), knit_child, options = block$params)
-    out = paste(unlist(cmds), collapse = '\n')
+    out = one_string(unlist(cmds))
     return(out)
   }
 
@@ -51,7 +51,7 @@ call_block = function(block) {
       warning("The option hook '", opt, "' should be a function")
       next
     }
-    if (!is.null(params[[opt]])) params = hook(params)
+    if (!is.null(params[[opt]])) params = as.strict_list(hook(params))
     if (!is.list(params))
       stop("The option hook '", opt, "' should return a list of chunk options")
   }
@@ -60,24 +60,26 @@ call_block = function(block) {
   if (params$cache > 0) {
     content = c(
       params[if (params$cache < 3) cache1.opts else setdiff(names(params), cache0.opts)],
-      getOption('width'), if (params$cache == 2) params[cache2.opts]
+      75L, if (params$cache == 2) params[cache2.opts]
     )
     if (params$engine == 'R' && isFALSE(params$cache.comments)) {
-      content[['code']] = formatR:::parse_only(content[['code']])
+      content[['code']] = parse_only(content[['code']])
     }
-    hash = paste(valid_path(params$cache.path, label), digest::digest(content), sep = '_')
+    hash = paste(valid_path(params$cache.path, label), digest(content), sep = '_')
     params$hash = hash
-    if (cache$exists(hash, params$cache.lazy) && isFALSE(params$cache.rebuild)) {
+    if (cache$exists(hash, params$cache.lazy) &&
+        isFALSE(params$cache.rebuild) &&
+        params$engine != 'Rcpp') {
       if (opts_knit$get('verbose')) message('  loading cache from ', hash)
       cache$load(hash, lazy = params$cache.lazy)
+      cache_engine(params)
       if (!params$include) return('')
       if (params$cache == 3) return(cache$output(hash))
     }
     if (params$engine == 'R')
       cache$library(params$cache.path, save = FALSE) # load packages
   } else if (label %in% names(dep_list$get()) && !isFALSE(opts_knit$get('warn.uncached.dep')))
-    warning('code chunks must not depend on the uncached chunk "', label, '"',
-            call. = FALSE)
+    warning2('code chunks must not depend on the uncached chunk "', label, '"')
 
   params$params.src = block$params.src
   opts_current$restore(params)  # save current options
@@ -102,14 +104,18 @@ block_exec = function(options) {
   if (options$engine != 'R') {
     res.before = run_hooks(before = TRUE, options)
     engine = get_engine(options$engine)
-    output = in_dir(opts_knit$get('root.dir') %n% input_dir(), engine(options))
+    output = in_dir(input_dir(), engine(options))
+    if (is.list(output)) output = unlist(output)
     res.after = run_hooks(before = FALSE, options)
     output = paste(c(res.before, output, res.after), collapse = '')
     output = knit_hooks$get('chunk')(output, options)
-    if (options$cache) block_cache(
-      options, output,
-      if (options$engine == 'stan') options$engine.opts$x else character(0)
-    )
+    if (options$cache) {
+      cache.exists = cache$exists(options$hash, options$cache.lazy)
+      if (options$cache.rebuild || !cache.exists) block_cache(options, output, switch(
+        options$engine,
+        'stan' = options$output.var, 'sql' = options$output.var, character(0)
+        ))
+      }
     return(if (options$include) output else '')
   }
 
@@ -118,37 +124,50 @@ block_exec = function(options) {
   obj.before = ls(globalenv(), all.names = TRUE)  # global objects before chunk
 
   keep = options$fig.keep
-  # open a device to record plots
-  if (chunk_device(options$fig.width[1L], options$fig.height[1L], keep != 'none',
-                   options$dev, options$dev.args, options$dpi, options)) {
-    # preserve par() settings from the last code chunk
-    if (keep.pars <- opts_knit$get('global.par'))
-      par2(opts_knit$get('global.pars'))
-    showtext(options$fig.showtext)  # showtext support
-    dv = dev.cur()
-    on.exit({
-      if (keep.pars) opts_knit$set(global.pars = par(no.readonly = TRUE))
-      dev.off(dv)
-    }, add = TRUE)
+  keep.idx = NULL
+  if (is.logical(keep)) keep = which(keep)
+  if (is.numeric(keep)) {
+    keep.idx = keep
+    keep = "index"
   }
+
+  if (keep.pars <- opts_knit$get('global.par')) on.exit({
+    opts_knit$set(global.pars = par(no.readonly = TRUE))
+  }, add = TRUE)
+
+  tmp.fig = tempfile(); on.exit(unlink(tmp.fig), add = TRUE)
+  # open a device to record plots if not using a global device or no device is
+  # open, and close this device if we don't want to use a global device
+  if (!opts_knit$get('global.device') || is.null(dev.list())) {
+    chunk_device(options, keep != 'none', tmp.fig)
+    dv = dev.cur()
+    if (!opts_knit$get('global.device')) on.exit(dev.off(dv), add = TRUE)
+    showtext(options)  # showtext support
+  }
+  # preserve par() settings from the last code chunk
+  if (keep.pars) par2(opts_knit$get('global.pars'))
 
   res.before = run_hooks(before = TRUE, options, env) # run 'before' hooks
 
   code = options$code
   echo = options$echo  # tidy code if echo
-  if (!isFALSE(echo) && options$tidy && length(code)) {
-    res = try_silent(do.call(
-      formatR::tidy_source, c(list(text = code, output = FALSE), options$tidy.opts)
-    ))
-    if (!inherits(res, 'try-error')) {
-      code = res$text.tidy
-    } else warning('failed to tidy R code in chunk <', options$label, '>\n',
-                   'reason: ', res)
+  if (!isFALSE(echo) && !isFALSE(options$tidy) && length(code)) {
+    tidy.method = if (isTRUE(options$tidy)) 'formatR' else options$tidy
+    if (is.character(tidy.method)) tidy.method = switch(
+      tidy.method,
+      formatR = function(code, ...) formatR::tidy_source(text = code, output = FALSE, ...)$text.tidy,
+      styler = function(code, ...) unclass(styler::style_text(text = code, ...))
+    )
+    res = try_silent(do.call(tidy.method, c(list(code), options$tidy.opts)))
+
+    if (!inherits(res, 'try-error')) code = res else warning(
+      "Failed to tidy R code in chunk '", options$label, "'. Reason:\n", res
+    )
   }
   # only evaluate certain lines
   if (is.numeric(ev <- options$eval)) {
     # group source code into syntactically complete expressions
-    if (!options$tidy) code = sapply(highr:::group_src(code), paste, collapse = '\n')
+    if (isFALSE(options$tidy)) code = sapply(highr:::group_src(code), one_string)
     iss = seq_along(code)
     code = comment_out(code, '##', setdiff(iss, iss[ev]), newline = FALSE)
   }
@@ -156,11 +175,6 @@ block_exec = function(options) {
   if (keep != 'none' && is.null(options$fig.ext))
     options$fig.ext = dev2ext(options$dev)
 
-  if (!is.null(err.code <- opts_knit$get('stop_on_error'))) {
-    warning('the package option stop_on_error was deprecated;',
-            ' use the chunk option error = ', err.code != 2L, ' instead')
-    options$error = err.code != 2L
-  }
   cache.exists = cache$exists(options$hash, options$cache.lazy)
   evaluate = knit_hooks$get('evaluate')
   # return code with class 'source' if not eval chunks
@@ -169,7 +183,7 @@ block_exec = function(options) {
   } else if (cache.exists && isFALSE(options$cache.rebuild)) {
     fix_evaluate(cache$output(options$hash, 'list'), options$cache == 1)
   } else in_dir(
-    opts_knit$get('root.dir') %n% input_dir(),
+    input_dir(),
     evaluate(
       code, envir = env, new_device = FALSE,
       keep_warning = !isFALSE(options$warning),
@@ -202,7 +216,7 @@ block_exec = function(options) {
   if (options$results == 'hide') res = Filter(Negate(is.character), res)
   if (options$results == 'hold') {
     i = vapply(res, is.character, logical(1))
-    if (any(i)) res = c(res[!i], list(paste(unlist(res[i]), collapse = '')))
+    if (any(i)) res = c(res[!i], merge_character(res[i]))
   }
   res = filter_evaluate(res, options$warning, evaluate::is.warning)
   res = filter_evaluate(res, options$message, evaluate::is.message)
@@ -219,6 +233,8 @@ block_exec = function(options) {
         if (keep %in% c('first', 'last')) {
           res = res[-(if (keep == 'last') head else tail)(which(figs), -1L)]
         } else {
+          # keep only selected
+          if (keep == 'index') res = res[-which(figs)[-keep.idx]]
           # merge low-level plotting changes
           if (keep == 'high') res = merge_low_plot(res, figs)
         }
@@ -227,7 +243,11 @@ block_exec = function(options) {
   }
   # number of plots in this chunk
   if (is.null(options$fig.num))
-    options$fig.num = if (length(res)) sum(sapply(res, evaluate::is.recordedplot)) else 0L
+    options$fig.num = if (length(res)) sum(sapply(res, function(x) {
+      if (evaluate::is.recordedplot(x)) return(1)
+      if (inherits(x, 'knit_image_paths')) return(length(x))
+      0
+    })) else 0L
 
   # merge neighbor elements of the same class into one element
   for (cls in c('source', 'message', 'warning')) res = merge_class(res, cls)
@@ -237,6 +257,7 @@ block_exec = function(options) {
   on.exit({
     plot_counter(reset = TRUE)
     shot_counter(reset = TRUE)
+    opts_knit$delete('plot_files')
   }, add = TRUE)  # restore plot number
 
   output = unlist(wrap(res, options)) # wrap all results together
@@ -246,14 +267,20 @@ block_exec = function(options) {
   output = knit_hooks$get('chunk')(output, options)
 
   if (options$cache > 0) {
-    obj.new = setdiff(ls(globalenv(), all.names = TRUE), obj.before)
+    # if cache.vars has been specifically provided, only cache these vars and no
+    # need to look for objects in globalenv()
+    obj.new = if (is.null(options$cache.vars)) setdiff(ls(globalenv(), all.names = TRUE), obj.before)
     copy_env(globalenv(), env, obj.new)
     objs = if (isFALSE(ev) || length(code) == 0) character(0) else
       options$cache.vars %n% codetools::findLocalsList(parse_only(code))
     # make sure all objects to be saved exist in env
     objs = intersect(c(objs, obj.new), ls(env, all.names = TRUE))
     if (options$autodep) {
-      cache$objects(objs, code, options$label, options$cache.path)
+      # you shall manually specify global object names if find_symbols() is not reliable
+      cache$objects(
+        objs, options$cache.globals %n% find_globals(code), options$label,
+        options$cache.path
+      )
       dep_auto()
     }
     if (options$cache < 3) {
@@ -261,7 +288,7 @@ block_exec = function(options) {
     } else block_cache(options, output, objs)
   }
 
-  if (options$include) output else ''
+  if (options$include) output else if (is.null(s <- options$indent)) '' else s
 }
 
 block_cache = function(options, output, objects) {
@@ -280,43 +307,49 @@ purge_cache = function(options) {
   ), '_????????????????????????????????'))
 }
 
-# open a device for a chunk; depending on the option global.device, may or may
-# not need to close the device on exit
-chunk_device = function(width, height, record = TRUE, dev, dev.args, dpi, options) {
-  dev_new = function() {
-    # actually I should adjust the recording device according to dev, but here
-    # I have only considered the png and tikz devices (because the measurement
-    # results can be very different especially with the latter, see #1066)
-    if (identical(dev, 'png')) {
-      do.call(grDevices::png, c(list(
-        filename = tempfile(), width = width, height = height, units = 'in', res = dpi
-      ), get_dargs(dev.args, 'png')))
-    } else if (identical(dev, 'tikz')) {
-      dargs = c(list(
-        file = paste0(tempfile(), ".tex"), width = width, height = height
-      ), get_dargs(dev.args, 'tikz'))
-      dargs$sanitize = options$sanitize; dargs$standAlone = options$external
-      if (is.null(dargs$verbose)) dargs$verbose = FALSE
-      do.call(tikz_dev, dargs)
-    } else if (identical(getOption('device'), pdf_null)) {
-      if (!is.null(dev.args)) {
-        dev.args = get_dargs(dev.args, 'pdf')
-        dev.args = dev.args[intersect(names(dev.args), c('pointsize', 'bg'))]
-      }
-      do.call(pdf_null, c(list(width = width, height = height), dev.args))
-    } else dev.new(width = width, height = height)
-  }
-  if (!opts_knit$get('global.device')) {
-    dev_new()
-    dev.control(displaylist = if (record) 'enable' else 'inhibit')  # enable recording
-    # if returns TRUE, we need to close this device after code is evaluated
-    return(TRUE)
-  } else if (is.null(dev.list())) {
-    # want to use a global device but not open yet
-    dev_new()
-    dev.control('enable')
-  }
-  FALSE
+# open a graphical device for a chunk to record plots
+chunk_device = function(options, record = TRUE, tmp = tempfile()) {
+  width = options$fig.width[1L]
+  height = options$fig.height[1L]
+  dev = options$dev
+  dev.args = options$dev.args
+  dpi = options$dpi
+
+  # actually I should adjust the recording device according to dev, but here I
+  # have only considered devices like png and tikz (because the measurement
+  # results can be very different especially with the latter, see #1066), the
+  # cairo_pdf device (#1235), and svg (#1705)
+  if (identical(dev, 'png')) {
+    do.call(grDevices::png, c(list(
+      filename = tmp, width = width, height = height, units = 'in', res = dpi
+    ), get_dargs(dev.args, 'png')))
+  } else if (identical(dev, 'ragg_png')) {
+    do.call(ragg_png_dev, c(list(
+      filename = tmp, width = width, height = height, units = 'in', res = dpi
+    ), get_dargs(dev.args, 'ragg_png')))
+  } else if (identical(dev, 'tikz')) {
+    dargs = c(list(
+      file = tmp, width = width, height = height
+    ), get_dargs(dev.args, 'tikz'))
+    dargs$sanitize = options$sanitize; dargs$standAlone = options$external
+    if (is.null(dargs$verbose)) dargs$verbose = FALSE
+    do.call(tikz_dev, dargs)
+  } else if (identical(dev, 'cairo_pdf')) {
+    do.call(grDevices::cairo_pdf, c(list(
+      filename = tmp, width = width, height = height
+    ), get_dargs(dev.args, 'cairo_pdf')))
+  } else if (identical(dev, 'svg')) {
+    do.call(grDevices::svg, c(list(
+      filename = tmp, width = width, height = height
+    ), get_dargs(dev.args, 'svg')))
+  } else if (identical(getOption('device'), pdf_null)) {
+    if (!is.null(dev.args)) {
+      dev.args = get_dargs(dev.args, 'pdf')
+      dev.args = dev.args[intersect(names(dev.args), c('pointsize', 'bg'))]
+    }
+    do.call(pdf_null, c(list(width = width, height = height), dev.args))
+  } else dev.new(width = width, height = height)
+  dev.control(displaylist = if (record) 'enable' else 'inhibit')
 }
 
 # filter out some results based on the numeric chunk option as indices
@@ -330,7 +363,11 @@ filter_evaluate = function(res, opt, test) {
 
 # find recorded plots in the output of evaluate()
 find_recordedplot = function(x) {
-  vapply(x, evaluate::is.recordedplot, logical(1))
+  vapply(x, is_plot_output, logical(1))
+}
+
+is_plot_output = function(x) {
+  evaluate::is.recordedplot(x) || inherits(x, 'knit_image_paths')
 }
 
 # move plots before source code
@@ -362,7 +399,8 @@ merge_class = function(res, class = c('source', 'message', 'warning')) {
     if (idx2 - idx1 == 1) {
       res2 = res[[idx2]]
       # merge warnings/messages only if next one is identical to previous one
-      if (class == 'source' || identical(res1, res2)) {
+      if (class == 'source' || identical(res1, res2) ||
+          (class == 'message' && !grepl('\n$', tail(res1[[el]], 1)))) {
         res[[k1]][[el]] = c(res[[k1]][[el]], res2[[el]])
         k2 = c(k2, idx2)
       } else {
@@ -376,12 +414,33 @@ merge_class = function(res, class = c('source', 'message', 'warning')) {
 
 }
 
-call_inline = function(block) {
-  if (opts_knit$get('progress')) print(block)
-  in_dir(opts_knit$get('root.dir') %n% input_dir(), inline_exec(block))
+# merge character output for output='hold', if the subsequent character is of
+# the same class(es) as the previous one (e.g. should not merge normal
+# characters with asis_output())
+merge_character = function(res) {
+  if ((n <- length(res)) <= 1) return(res)
+  k = NULL
+  for (i in 1:(n - 1)) {
+    cls = class(res[[i]])
+    if (identical(cls, class(res[[i + 1]]))) {
+      res[[i + 1]] = paste0(res[[i]], res[[i + 1]])
+      class(res[[i + 1]]) = cls
+      k = c(k, i)
+    }
+  }
+  if (length(k)) res = res[-k]
+  res
 }
 
-inline_exec = function(block, envir = knit_global(), hook = knit_hooks$get('inline')) {
+call_inline = function(block) {
+  if (opts_knit$get('progress')) print(block)
+  in_dir(input_dir(), inline_exec(block))
+}
+
+inline_exec = function(
+  block, envir = knit_global(), hook = knit_hooks$get('inline'),
+  hook_eval = knit_hooks$get('evaluate.inline')
+) {
 
   # run inline code and substitute original texts
   code = block$code; input = block$input
@@ -389,8 +448,7 @@ inline_exec = function(block, envir = knit_global(), hook = knit_hooks$get('inli
 
   loc = block$location
   for (i in 1:n) {
-    v = withVisible(eval(parse_only(code[i]), envir = envir))
-    res = if (v$visible) knit_print(v$value, inline = TRUE, options = opts_chunk$get())
+    res = hook_eval(code[i], envir)
     if (inherits(res, 'knit_asis')) res = wrap(res, inline = TRUE)
     d = nchar(input)
     # replace with evaluated results
@@ -409,42 +467,56 @@ process_tangle = function(x) {
 #' @export
 process_tangle.block = function(x) {
   params = opts_chunk$merge(x$params)
-  for (o in c('purl', 'eval', 'child'))
-    try(params[o] <- list(eval_lang(params[[o]])))
+  for (o in c('purl', 'eval', 'child')) {
+    if (inherits(try(params[o] <- list(eval_lang(params[[o]]))), 'try-error')) {
+      params[['purl']] = FALSE  # if any of these options cannot be determined, don't purl
+    }
+  }
   if (isFALSE(params$purl)) return('')
   label = params$label; ev = params$eval
+  if (params$engine != 'R') return(one_string(comment_out(knit_code$get(label))))
   code = if (!isFALSE(ev) && !is.null(params$child)) {
     cmds = lapply(sc_split(params$child), knit_child)
-    paste(unlist(cmds), collapse = '\n')
+    one_string(unlist(cmds))
   } else knit_code$get(label)
   # read external code if exists
-  if (!isFALSE(ev) && length(code) && grepl('read_chunk\\(.+\\)', code)) {
+  if (!isFALSE(ev) && length(code) && any(grepl('read_chunk\\(.+\\)', code))) {
     eval(parse_only(unlist(stringr::str_extract_all(code, 'read_chunk\\(([^)]+)\\)'))))
   }
   code = parse_chunk(code)
   if (isFALSE(ev)) code = comment_out(code, params$comment, newline = FALSE)
-  if (opts_knit$get('documentation') == 0L) return(paste(code, collapse = '\n'))
+  if (opts_knit$get('documentation') == 0L) return(one_string(code))
   label_code(code, x$params.src)
 }
 #' @export
 process_tangle.inline = function(x) {
-  if (opts_knit$get('documentation') == 2L) {
-    return(paste(line_prompt(x$input.src, "#' ", "#' "), collapse = '\n'))
-  }
+
+  output = if (opts_knit$get('documentation') == 2L) {
+    output = one_string(line_prompt(x$input.src, "#' ", "#' "))
+  } else ''
+
   code = x$code
-  if (length(code) == 0L || !any(idx <- grepl('knit_child\\(.+\\)', code)))
-    return('')
-  paste(c(sapply(code[idx], function(z) eval(parse_only(z))), ''), collapse = '\n')
+  if (length(code) == 0L) return(output)
+
+  if (getOption('knitr.purl.inline', FALSE)) output = c(output, code)
+
+  idx = grepl('knit_child\\(.+\\)', code)
+  if (any(idx)) {
+    cout = sapply(code[idx], function(z) eval(parse_only(z)))
+    output = c(output, cout, '')
+  }
+
+  one_string(output)
 }
 
 
 # add a label [and extra chunk options] to a code chunk
 label_code = function(code, label) {
-  code = paste(c('', code, ''), collapse = '\n')
+  code = one_string(c('', code, ''))
   paste0('## ----', stringr::str_pad(label, max(getOption('width') - 11L, 0L), 'right', '-'),
          '----', code)
 }
 
-as.source <- function(code) {
+as.source = function(code) {
   list(structure(list(src = code), class = 'source'))
 }

@@ -1,6 +1,6 @@
 # format a single inline object
 .inline.hook = function(x) {
-  if (is.numeric(x)) x = round(x, getOption('digits'))
+  if (is.numeric(x)) x = round_digits(x)
   paste(as.character(x), collapse = ', ')
 }
 .out.hook = function(x, options) x
@@ -10,7 +10,11 @@
   source = .out.hook, output = .out.hook, warning = .out.hook,
   message = .out.hook, error = .out.hook, plot = .plot.hook,
   inline = .inline.hook, chunk = .out.hook, text = identity,
-  evaluate = evaluate::evaluate, document = identity
+  evaluate.inline = function(code, envir = knit_global()) {
+    v = withVisible(eval(parse_only(code), envir = envir))
+    if (v$visible) knit_print(v$value, inline = TRUE, options = opts_chunk$get())
+  },
+  evaluate = function(...) evaluate::evaluate(...), document = identity
 )
 
 #' Hooks for R code chunks, inline R code and output
@@ -19,9 +23,9 @@
 #' arguments and returns desired output. The object \code{knit_hooks} is used to
 #' access or set hooks in this package.
 #' @export
-#' @references Usage: \url{http://yihui.name/knitr/objects}
+#' @references Usage: \url{https://yihui.org/knitr/objects/}
 #'
-#' Components in \code{knit_hooks}: \url{http://yihui.name/knitr/hooks}
+#' Components in \code{knit_hooks}: \url{https://yihui.org/knitr/hooks/}
 #' @examples knit_hooks$get('source'); knit_hooks$get('inline')
 knit_hooks = new_defaults(.default.hooks)
 
@@ -41,7 +45,7 @@ hook_suppress = function(x, options) {
   } else {
     if (m > sum(n)) x = c(head(x, n[1]), '....', tail(x, n[2]))
   }
-  paste(x, collapse = '\n')
+  one_string(x)
 }
 
 #' Hooks for code chunk options
@@ -54,7 +58,7 @@ hook_suppress = function(x, options) {
 #' \code{opts_hooks$set(FOO = function(options) { options })} (you can manipuate
 #' the \code{options} argument in the function and return it), the hook function
 #' will be called to update the chunk options.
-#' @references \url{http://yihui.name/knitr/hooks}
+#' @references \url{https://yihui.org/knitr/hooks/}
 #' @export
 #' @examples # make sure the figure width is no smaller than fig.height
 #' opts_hooks$set(fig.width = function(options) {

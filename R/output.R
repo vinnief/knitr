@@ -3,7 +3,9 @@
 #' This function takes an input file, extracts the R code in it according to a
 #' list of patterns, evaluates the code and writes the output in another file.
 #' It can also tangle R source code from the input document (\code{purl()} is a
-#' wrapper to \code{knit(..., tangle = TRUE)}).
+#' wrapper to \code{knit(..., tangle = TRUE)}). The \code{knitr.purl.inline}
+#' option can be used to also tangle the code of inline expressions (disabled by
+#' default).
 #'
 #' For most of the time, it is not necessary to set any options outside the
 #' input document; in other words, a single call like
@@ -32,9 +34,9 @@
 #' \code{apat$rnw}, \samp{tex} uses the list \code{apat$tex}, \samp{brew} uses
 #' \code{apat$brew} and HTML files use \code{apat$html}; for unkown extensions,
 #' the content of the input document is matched against all pattern lists to
-#' automatically determine which pattern list is being used. You can also manually
-#' set the pattern list using the \code{\link{knit_patterns}} object or the
-#' \code{\link{pat_rnw}} series functions in advance and \pkg{knitr} will
+#' automatically determine which pattern list is being used. You can also
+#' manually set the pattern list using the \code{\link{knit_patterns}} object or
+#' the \code{\link{pat_rnw}} series functions in advance and \pkg{knitr} will
 #' respect the setting.
 #'
 #' According to the output format (\code{opts_knit$get('out.format')}), a set of
@@ -53,19 +55,20 @@
 #' See the package website and manuals in the references to know more about
 #' \pkg{knitr}, including the full documentation of chunk options and demos,
 #' etc.
-#' @param input path of the input file
-#' @param output path of the output file for \code{knit()}; if \code{NULL}, this
-#'   function will try to guess and it will be under the current working
-#'   directory
-#' @param tangle whether to tangle the R code from the input file (like
-#'   \code{\link[utils]{Stangle}})
-#' @param text a character vector as an alternative way to provide the input
-#'   file
-#' @param quiet whether to suppress the progress bar and messages
-#' @param envir the environment in which the code chunks are to be evaluated
-#'   (for example, \code{\link{parent.frame}()}, \code{\link{new.env}()}, or
-#'   \code{\link{globalenv}()})
-#' @param encoding the encoding of the input file; see \code{\link{file}}
+#' @param input Path to the input file.
+#' @param output Path to the output file for \code{knit()}. If \code{NULL}, this
+#'   function will try to guess a default, which will be under the current
+#'   working directory.
+#' @param tangle Boolean; whether to tangle the R code from the input file (like
+#'   \code{utils::\link{Stangle}}).
+#' @param text A character vector. This is an alternative way to provide the
+#'   input file.
+#' @param quiet Boolean; suppress the progress bar and messages?
+#' @param envir Environment in which code chunks are to be evaluated, for
+#'   example, \code{\link{parent.frame}()}, \code{\link{new.env}()}, or
+#'   \code{\link{globalenv}()}).
+#' @param encoding Encoding of the input file; always assumed to be UTF-8 (i.e.,
+#'   this argument is effectively ignored).
 #' @return The compiled document is written into the output file, and the path
 #'   of the output file is returned. If the \code{text} argument is not
 #'   \code{NULL}, the compiled output is returned as a character vector. In
@@ -79,27 +82,20 @@
 #'   \code{\link{opts_knit}$set(root.dir = ...)} so all paths in code chunks are
 #'   relative to this \code{root.dir}. It is not recommended to change the
 #'   working directory via \code{\link{setwd}()} in a code chunk, because it may
-#'   lead to terrible consequences (e.g. figure and cache files may be written to
-#'   wrong places). If you do use \code{setwd()}, please note that \pkg{knitr}
-#'   will always restore the working directory to the original one. Whenever you
-#'   feel confused, print \code{getwd()} in a code chunk to see what the working
-#'   directory really is.
-#'
-#'   The arguments \code{input} and \code{output} do not have to be restricted
-#'   to files; they can be \code{stdin()}/\code{stdout()} or other types of
-#'   connections, but the pattern list to read the input has to be set in
-#'   advance (see \code{\link{pat_rnw}}), and the output hooks should also be
-#'   set (see \code{\link{render_latex}}), otherwise \pkg{knitr} will try to
-#'   guess the patterns and output format.
+#'   lead to terrible consequences (e.g. figure and cache files may be written
+#'   to wrong places). If you do use \code{setwd()}, please note that
+#'   \pkg{knitr} will always restore the working directory to the original one.
+#'   Whenever you feel confused, print \code{getwd()} in a code chunk to see
+#'   what the working directory really is.
 #'
 #'   If the \code{output} argument is a file path, it is strongly recommended to
 #'   be in the current working directory (e.g. \file{foo.tex} instead of
 #'   \file{somewhere/foo.tex}), especially when the output has external
 #'   dependencies such as figure files. If you want to write the output to a
-#'   different directory, it is recommended to set the working directory to
-#'   that directory before you knit a document. For example, if the source
-#'   document is \file{foo.Rmd} and the expected output is \file{out/foo.md},
-#'   you can write \code{setwd('out/'); knit('../foo.Rmd')} instead of
+#'   different directory, it is recommended to set the working directory to that
+#'   directory before you knit a document. For example, if the source document
+#'   is \file{foo.Rmd} and the expected output is \file{out/foo.md}, you can
+#'   write \code{setwd('out/'); knit('../foo.Rmd')} instead of
 #'   \code{knit('foo.Rmd', 'out/foo.md')}.
 #'
 #'   N.B. There is no guarantee that the R script generated by \code{purl()} can
@@ -111,9 +107,9 @@
 #'   the R script generated by \code{purl()}. This seems to be obvious, but some
 #'   people \href{http://bit.ly/SnLi6h}{just do not get it}.
 #' @export
-#' @references Package homepage: \url{http://yihui.name/knitr/}. The \pkg{knitr}
-#'   \href{http://yihui.name/knitr/demo/manual/}{main manual}: and
-#'   \href{http://yihui.name/knitr/demo/graphics}{graphics manual}.
+#' @references Package homepage: \url{https://yihui.org/knitr/}. The \pkg{knitr}
+#'   \href{https://yihui.org/knitr/demo/manual/}{main manual}: and
+#'   \href{https://yihui.org/knitr/demo/graphics/}{graphics manual}.
 #'
 #'   See \code{citation('knitr')} for the citation information.
 #' @examples library(knitr)
@@ -123,45 +119,43 @@
 #' purl(f)  # tangle R code
 #' purl(f, documentation = 0)  # extract R code only
 #' purl(f, documentation = 2)  # also include documentation
-knit = function(input, output = NULL, tangle = FALSE, text = NULL, quiet = FALSE,
-                envir = parent.frame(), encoding = getOption('encoding')) {
+#'
+#' unlink(c('knitr-minimal.tex', 'knitr-minimal.R', 'figure'), recursive = TRUE)
+knit = function(
+  input, output = NULL, tangle = FALSE, text = NULL, quiet = FALSE,
+  envir = parent.frame(), encoding = 'UTF-8'
+) {
 
-  # is input from a file? (or a connection on a file)
-  in.file = !missing(input) &&
-    (is.character(input) || prod(inherits(input, c('file', 'connection'), TRUE)))
+  in.file = !missing(input) && is.character(input)  # is input provided?
   oconc = knit_concord$get(); on.exit(knit_concord$set(oconc), add = TRUE)
-  # make a copy of the input path in input2 and change input to file path
-  if (!missing(input)) input2 = input
-  if (in.file && !is.character(input)) input = summary(input)$description
 
   if (child_mode()) {
     setwd(opts_knit$get('output.dir')) # always restore original working dir
     # in child mode, input path needs to be adjusted
     if (in.file && !is_abs_path(input)) {
       input = paste0(opts_knit$get('child.path'), input)
-      input = input2 = file.path(input_dir(), input)
+      input = file.path(input_dir(TRUE), input)
     }
     # respect the quiet argument in child mode (#741)
     optk = opts_knit$get(); on.exit(opts_knit$set(optk), add = TRUE)
     opts_knit$set(progress = opts_knit$get('progress') && !quiet)
+    quiet = !opts_knit$get('progress')
   } else {
     opts_knit$set(output.dir = getwd()) # record working directory in 1st run
     knit_log$restore()
     on.exit(chunk_counter(reset = TRUE), add = TRUE) # restore counter
     adjust_opts_knit()
-    # turn off fancy quotes, use smaller width
+    # turn off fancy quotes, use a null pdf device to record graphics
     oopts = options(
-      useFancyQuotes = FALSE, width = opts_knit$get('width'),
-      knitr.in.progress = TRUE, device = pdf_null
+      useFancyQuotes = FALSE, device = pdf_null, knitr.in.progress = TRUE
     )
     on.exit(options(oopts), add = TRUE)
     # restore chunk options after parent exits
     optc = opts_chunk$get(); on.exit(opts_chunk$restore(optc), add = TRUE)
     ocode = knit_code$get(); on.exit(knit_code$restore(ocode), add = TRUE)
+    on.exit(opts_current$restore(), add = TRUE)
     optk = opts_knit$get(); on.exit(opts_knit$set(optk), add = TRUE)
-    opts_knit$set(tangle = tangle, encoding = encoding,
-                  progress = opts_knit$get('progress') && !quiet
-    )
+    opts_knit$set(tangle = tangle, progress = opts_knit$get('progress') && !quiet)
   }
   # store the evaluation environment and restore on exit
   oenvir = .knitEnv$knit_global; .knitEnv$knit_global = envir
@@ -177,8 +171,8 @@ knit = function(input, output = NULL, tangle = FALSE, text = NULL, quiet = FALSE
     # do not run purl() when the output is newer than input (the output might
     # have been generated by hook_purl)
     if (is.character(output) && !child_mode()) {
-      out.purl = sub_ext(input, 'R')
-      if (same_file(output, out.purl) && tangle && file_test('-nt', out.purl, input))
+      out.purl = with_ext(input, 'R')
+      if (xfun::same_path(output, out.purl) && tangle && file_test('-nt', out.purl, input))
         return(out.purl)
       otangle = .knitEnv$tangle.file  # the tangled R script
       .knitEnv$tangle.file = normalizePath(out.purl, mustWork = FALSE)
@@ -192,12 +186,13 @@ knit = function(input, output = NULL, tangle = FALSE, text = NULL, quiet = FALSE
     knit_concord$set(infile = input, outfile = output)
   }
 
-  encoding = correct_encode(encoding)
-  text = if (is.null(text)) {
-    readLines(if (is.character(input2)) {
-      con = file(input2, encoding = encoding); on.exit(close(con), add = TRUE); con
-    } else input2, warn = FALSE)
-  } else split_lines(text) # make sure each element is one line
+  if (is.null(text)) {
+    text = readLines(input, encoding = 'UTF-8', warn = FALSE)
+    if (!is_utf8(text)) warning(
+      'The file "', input, '" must be encoded in UTF-8. Please see ',
+      'https://yihui.org/en/2018/11/biggest-regret-knitr/ for more info.'
+    )
+  } else text = split_lines(text) # make sure each element is one line
   if (!length(text)) {
     if (is.character(output)) file.create(output)
     return(output) # a trivial case: create an empty file and exit
@@ -209,14 +204,18 @@ knit = function(input, output = NULL, tangle = FALSE, text = NULL, quiet = FALSE
     # use ext if cannot auto detect pattern
     if (is.null(pattern <- detect_pattern(text, ext))) {
       # nothing to be executed; just return original input
-      if (is.null(output)) return(paste(text, collapse = '\n')) else {
-        cat(text, sep = '\n', file = output); return(output)
+      if (is.null(output)) {
+        return(if (tangle) '' else one_string(text))
+      } else {
+        write_utf8(if (tangle) '' else text, output)
+        return(output)
       }
     }
-    if (!(pattern %in% names(apat)))
-      stop("a pattern list cannot be automatically found for the file extension '",
-           ext, "' in built-in pattern lists; ",
-           'see ?knit_patterns on how to set up customized patterns')
+    if (!(pattern %in% names(apat))) stop(
+      "a pattern list cannot be automatically found for the file extension '",
+      ext, "' in built-in pattern lists; ",
+      'see ?knit_patterns on how to set up customized patterns'
+    )
     set_pattern(pattern)
     if (pattern == 'rnw' && length(sweave_lines <- which_sweave(text)) > 0)
       remind_sweave(if (in.file) input, sweave_lines)
@@ -252,11 +251,9 @@ knit = function(input, output = NULL, tangle = FALSE, text = NULL, quiet = FALSE
   progress = opts_knit$get('progress')
   if (in.file && !quiet) message(ifelse(progress, '\n\n', ''), 'processing file: ', input)
   res = process_file(text, output)
-  res = paste(knit_hooks$get('document')(res), collapse = '\n')
+  res = one_string(knit_hooks$get('document')(res))
   if (tangle) res = c(params, res)
-  if (!is.null(output))
-    writeLines(if (encoding == '') res else native_encode(res, to = encoding),
-               con = output, useBytes = encoding != '')
+  if (!is.null(output)) write_utf8(res, output)
   if (!child_mode()) {
     dep_list$restore()  # empty dependency list
     .knitEnv$labels = NULL
@@ -270,10 +267,10 @@ knit = function(input, output = NULL, tangle = FALSE, text = NULL, quiet = FALSE
   output %n% res
 }
 #' @rdname knit
-#' @param documentation an integer specifying the level of documentation to go
-#'   the tangled script: \code{0} means pure code (discard all text chunks);
-#'   \code{1} (default) means add the chunk headers to code; \code{2} means add
-#'   all text chunks to code as roxygen comments
+#' @param documentation An integer specifying the level of documentation to add to
+#'   the tangled script. \code{0} means to output pure code, discarding all text chunks);
+#'   \code{1} (the default) means to add the chunk headers to the code; \code{2} means to
+#'   add all text chunks to code as roxygen comments.
 #' @param ... arguments passed to \code{\link{knit}()} from \code{purl()}
 #' @export
 purl = function(..., documentation = 1L) {
@@ -297,7 +294,7 @@ process_file = function(text, output) {
   wd = getwd()
   for (i in 1:n) {
     if (!is.null(.knitEnv$terminate)) {
-      res[i] = paste(.knitEnv$terminate, collapse = '\n')
+      res[i] = one_string(.knitEnv$terminate)
       knit_exit(NULL)
       break  # must have called knit_exit(), so exit early
     }
@@ -324,7 +321,7 @@ process_file = function(text, output) {
   # output line numbers
   if (concord_mode()) knit_concord$set(outlines = line_count(res))
   print_knitlog()
-  if (tangle) res = res[res != '']
+  if (tangle) res = strip_white(res)
 
   res
 }
@@ -364,16 +361,16 @@ auto_format = function(ext) {
 #' the result into the main document. It is designed to be used in the chunk
 #' option \code{child} and serves as the alternative to the
 #' \command{SweaveInput} command in Sweave.
-#' @param ... arguments passed to \code{\link{knit}}
-#' @param options a list of chunk options to be used as global options inside
-#'   the child document (ignored if not a list); when one uses the \code{child}
+#' @param ... Arguments passed to \code{\link{knit}}.
+#' @param options A list of chunk options to be used as global options inside
+#'   the child document. When one uses the \code{child}
 #'   option in a parent chunk, the chunk options of the parent chunk will be
-#'   passed to the \code{options} argument here
+#'   passed to the \code{options} argument here.  Ignored if not a list.
 #' @inheritParams knit
 #' @return A character string of the content of the compiled child document is
 #'   returned as a character string so it can be written back to the parent
 #'   document directly.
-#' @references \url{http://yihui.name/knitr/demo/child/}
+#' @references \url{https://yihui.org/knitr/demo/child/}
 #' @note This function is not supposed be called directly like
 #'   \code{\link{knit}()}; instead it must be placed in a parent document to let
 #'   \code{\link{knit}()} call it indirectly.
@@ -399,9 +396,8 @@ knit_child = function(..., options = NULL, envir = knit_global()) {
       }, add = TRUE)
     }
   }
-  res = knit(..., tangle = opts_knit$get('tangle'), envir = envir,
-             encoding = opts_knit$get('encoding') %n% getOption('encoding'))
-  paste(c('', res), collapse = '\n')
+  res = knit(..., tangle = opts_knit$get('tangle'), envir = envir)
+  one_string(c('', res))
 }
 
 #' Exit knitting early
@@ -409,10 +405,10 @@ knit_child = function(..., options = NULL, envir = knit_global()) {
 #' Sometimes we may want to exit the knitting process early, and completely
 #' ignore the rest of the document. This function provides a mechanism to
 #' terminate \code{\link{knit}()}.
-#' @param append a character vector to be appended to the results from
-#'   \code{knit()} so far; by default, it is \samp{\end{document}} for LaTeX
-#'   output, and \samp{</body></html>} for HTML output to make the output
-#'   document complete; for other types of output, it is an empty string
+#' @param append A character vector to be appended to the results from
+#'   \code{knit()} so far. By default, this is \samp{\end{document}} for LaTeX
+#'   output, and \samp{</body></html>} for HTML output, to make the output
+#'   document complete. For other types of output, it is an empty string.
 #' @return Invisible \code{NULL}. An internal signal is set up (as a side
 #'   effect) to notify \code{knit()} to quit as if it had reached the end of the
 #'   document.
@@ -429,8 +425,8 @@ knit_log = new_defaults()  # knitr log for errors, warnings and messages
 
 #' Wrap evaluated results for output
 #'
-#' @param x output from \code{\link[evaluate]{evaluate}}
-#' @param options list of options used to control output
+#' @param x output from \code{evaluate::\link{evaluate}()}
+#' @param options List of options used to control output
 #' @noRd
 wrap = function(x, options = list(), ...) {
   UseMethod('wrap', x)
@@ -469,6 +465,11 @@ wrap.knit_asis = function(x, options, inline = FALSE) {
     # store metadata in an object named of the form .hash_meta when cache=TRUE
     if (length(m) && options$cache == 3)
       assign(cache_meta_name(options$hash), m, envir = knit_global())
+    if (inherits(x, 'knit_asis_htmlwidget')) {
+      options$fig.cur = plot_counter()
+      options = reduce_plot_opts(options)
+      return(add_html_caption(options, x))
+    }
   }
   x = as.character(x)
   if (!out_format('latex') || inline) return(x)
@@ -479,6 +480,7 @@ wrap.knit_asis = function(x, options, inline = FALSE) {
 
 #' @export
 wrap.source = function(x, options) {
+  if (isFALSE(options$echo)) return()
   src = sub('\n$', '', x$src)
   if (!options$collapse && options$strip.white) src = strip_white(src)
   if (is_blank(src)) return()  # an empty chunk
@@ -493,7 +495,7 @@ msg_wrap = function(message, type, options) {
     list(c(knit_log$get(type), paste0('Chunk ', options$label, ':\n  ', message))),
     type
   ))
-  msg_sanitize(message, type)
+  message = msg_sanitize(message, type)
   knit_hooks$get(type)(comment_out(message, options$comment), options)
 }
 
@@ -539,19 +541,19 @@ wrap.recordedplot = function(x, options) {
       dir.create(dirname(name), recursive = TRUE)
   )
   # vectorize over dev, ext and dpi: save multiple versions of the plot
-  file = mapply(
+  files = mapply(
     save_plot, width = options$fig.width, height = options$fig.height,
     dev = options$dev, ext = options$fig.ext, dpi = options$dpi,
     MoreArgs = list(plot = x, name = name, options = options), SIMPLIFY = FALSE
-  )[[1]]
+  )
+  opts_knit$append(plot_files = unlist(files))
   if (options$fig.show == 'hide') return('')
-  knit_hooks$get('plot')(file, reduce_plot_opts(options))
+  in_base_dir(run_hook_plot(files[[1]], reduce_plot_opts(options)))
 }
 
 #' @export
 wrap.knit_image_paths = function(x, options = opts_chunk$get(), inline = FALSE) {
-  hook_plot = knit_hooks$get('plot')
-  options$fig.num = length(x)
+  if (options$fig.show == 'hide') return('')
   # remove the automatically set out.width when fig.retina is set, otherwise the
   # size of external images embedded via include_graphics() will be set to
   # fig.width * dpi in fix_options()
@@ -561,19 +563,20 @@ wrap.knit_image_paths = function(x, options = opts_chunk$get(), inline = FALSE) 
     if (length(w1) * length(w2) == 1 && is.numeric(w1) && w1 == w2)
       options['out.width'] = list(NULL)
   }
+  options$fig.num = options$fig.num %n% length(x)
   dpi = attr(x, 'dpi') %n% options$dpi
+  hook = knit_hooks$get('plot')
   paste(unlist(lapply(seq_along(x), function(i) {
-    options$fig.cur = i
+    options$fig.cur = plot_counter()
     if (is.null(options[['out.width']]))
       options['out.width'] = list(raster_dpi_width(x[i], dpi))
-    hook_plot(x[i], reduce_plot_opts(options))
+    hook(x[i], reduce_plot_opts(options))
   })), collapse = '')
 }
 
 #' @export
 wrap.html_screenshot = function(x, options = opts_chunk$get(), inline = FALSE) {
   ext = x$extension
-  hook_plot = knit_hooks$get('plot')
   in_base_dir({
     i = plot_counter()
     if (is.null(f <- x$file)) {
@@ -581,28 +584,39 @@ wrap.html_screenshot = function(x, options = opts_chunk$get(), inline = FALSE) {
       dir.create(dirname(f), recursive = TRUE, showWarnings = FALSE)
       writeBin(x$image, f, useBytes = TRUE)
     }
-    # crop white margins
-    if (isTRUE(options$crop)) in_dir(dirname(f), plot_crop(basename(f)))
     options$fig.cur = i
     options = reduce_plot_opts(options)
     if (!is.null(x$url) && is.null(options$fig.link)) options$fig.link = x$url
-    hook_plot(f, options)
+    run_hook_plot(f, options)
   })
+}
+
+# record plot filenames in opts_knit$get('plot_files'), including those from R
+# code and auto screenshots of HTML widgets, etc. Then run the plot hook.
+run_hook_plot = function(x, options) {
+  opts_knit$append(plot_files = x)
+  hook = knit_hooks$get('plot')
+  hook(x, options)
 }
 
 #' @export
 wrap.knit_embed_url = function(x, options = opts_chunk$get(), inline = FALSE) {
   options$fig.cur = plot_counter()
   options = reduce_plot_opts(options)
-  iframe = sprintf(
-    '<iframe src="%s" width="%s" height="%s"></iframe>',
-    escape_html(x$url), options$out.width %n% '100%', x$height %n% '400px'
-  )
+  if (length(extra <- options$out.extra)) extra = paste('', extra, collapse = '')
+  add_html_caption(options, sprintf(
+    '<iframe src="%s" width="%s" height="%s"%s></iframe>',
+    escape_html(x$url), options$out.width %n% '100%', x$height %n% '400px',
+    extra %n% ''
+  ))
+}
+
+add_html_caption = function(options, code) {
   cap = .img.cap(options)
-  if (cap == '') return(iframe)
+  if (cap == '') return(code)
   sprintf(
     '<div class="figure"%s>\n%s\n<p class="caption">%s</p>\n</div>',
-    css_text_align(options$fig.align), iframe, cap
+    css_text_align(options$fig.align), code, cap
   )
 }
 
@@ -619,10 +633,10 @@ wrap.knit_embed_url = function(x, options = opts_chunk$get(), inline = FALSE) {
 #' method \code{knit_print.data.frame} that turns a data.frame into a table (the
 #' implementation may use other R packages or functions, e.g. \pkg{xtable} or
 #' \code{\link{kable}()}).
-#' @param x an R object to be printed
-#' @param ... additional arguments passed to the S3 method (currently ignored,
+#' @param x An R object to be printed
+#' @param ... Additional arguments passed to the S3 method. Currently ignored,
 #'   except two optional arguments \code{options} and \code{inline}; see
-#'   the references below)
+#'   the references below.
 #' @return The value returned from the print method should be a character vector
 #'   or can be converted to a character value. You can wrap the value in
 #'   \code{\link{asis_output}()} so that \pkg{knitr} writes the character value
@@ -638,8 +652,10 @@ wrap.knit_embed_url = function(x, options = opts_chunk$get(), inline = FALSE) {
 #'   res = paste(c('', '', kable(x, output = FALSE)), collapse = '\n')
 #'   asis_output(res)
 #' }
-#' # after you defined the above method, data frames will be printed as tables in knitr,
-#' # which is different with the default print() behavior
+#' # register the method
+#' registerS3method("knit_print", "data.frame", knit_print.data.frame)
+#' # after you define and register the above method, data frames will be printed
+#' # as tables in knitr, which is different with the default print() behavior
 knit_print = function(x, ...) {
   if (need_screenshot(x, ...)) {
     html_screenshot(x)
@@ -685,14 +701,14 @@ formals(normal_print) = alist(x = , ... = )
 #' will be saved and loaded automatically when caching is enabled), but not all
 #' metadata can be saved and loaded next time and still works in the new R
 #' session.
-#' @param x an R object (typically a character string, or can be converted to a
-#'   character string via \code{\link{as.character}()})
-#' @param meta additional metadata of the object to be printed (the metadata
+#' @param x An R object. Typically a character string, or an object which can
+#'    be converted to a character string via \code{\link{as.character}()}.
+#' @param meta Additional metadata of the object to be printed. The metadata
 #'   will be collected when the object is printed, and accessible via
-#'   \code{knit_meta()})
-#' @param cacheable a logical value indicating if this object is cacheable; if
+#'   \code{knit_meta()}.
+#' @param cacheable Boolean indicating whether this object is cacheable. If
 #'   \code{FALSE}, \pkg{knitr} will stop when caching is enabled on code chunks
-#'   that contain \code{asis_output()}
+#'   that contain \code{asis_output()}.
 #' @note This function only works in top-level R expressions, and it will not
 #'   work when it is called inside another expression, such as a for-loop. See
 #'   \url{https://github.com/yihui/knitr/issues/1137} for a discussion.
@@ -708,13 +724,13 @@ asis_output = function(x, meta = NULL, cacheable = NA) {
 #' available). After knitting is done, all the metadata is accessible via this
 #' function. You can manually add metadata to the \pkg{knitr} session via
 #' \code{knit_meta_add()}.
-#' @param class optionally return only metadata entries that inherit from the
-#'   specified class; the default, \code{NULL}, returns all entries.
-#' @param clean whether to clean the collected metadata; by default, the
+#' @param class Optionally return only metadata entries that inherit from the
+#'   specified class. The default, \code{NULL}, returns all entries.
+#' @param clean Whether to clean the collected metadata. By default, the
 #'   metadata stored in \pkg{knitr} is cleaned up once retrieved, because we may
 #'   not want the metadata to be passed to the next \code{knit()} call; to be
 #'   defensive (i.e. not to have carryover metadata), you can call
-#'   \code{knit_meta()} before \code{knit()}
+#'   \code{knit_meta()} before \code{knit()}.
 #' @export
 #' @return \code{knit_meta()} returns the matched metadata specified by
 #'   \code{class}; \code{knit_meta_add()} returns all current metadata.
@@ -736,15 +752,15 @@ knit_meta = function(class = NULL, clean = TRUE) {
   .knitEnv$meta[matches]
 }
 
-#' @param meta a metadata object to be added to the session
-#' @param label a chunk label to indicate which chunk the metadata belongs to
+#' @param meta A metadata object to be added to the session.
+#' @param label A chunk label to indicate which chunk the metadata belongs to.
 #' @rdname knit_meta
 #' @export
 knit_meta_add = function(meta, label = '') {
   if (length(meta)) {
     meta_id = attr(.knitEnv$meta, 'knit_meta_id')
     .knitEnv$meta = c(.knitEnv$meta, meta)
-    attr(.knitEnv$meta, 'knit_meta_id') = c(meta_id, rep(label, length(meta)))
+    attr(.knitEnv$meta, 'knit_meta_id') = c(meta_id, rep_len(label, length(meta)))
   }
   .knitEnv$meta
 }

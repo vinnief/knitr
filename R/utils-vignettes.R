@@ -2,7 +2,7 @@
 #'
 #' Since R 3.0.0, package vignettes can use non-Sweave engines, and \pkg{knitr}
 #' has provided a few engines to compile vignettes via \code{\link{knit}()} with
-#' different templates. See \url{http://yihui.name/knitr/demo/vignette/} for
+#' different templates. See \url{https://yihui.org/knitr/demo/vignette/} for
 #' more information.
 #' @name vignette_engines
 #' @note If you use the \code{knitr::rmarkdown} engine, please make sure that
@@ -15,7 +15,7 @@
 #'   (or \code{Sys.which('pandoc')} and \code{Sys.which('pandoc-citeproc')} in
 #'   R) to check if \command{pandoc} and \command{pandoc-citeproc} can be found.
 #'   If you use Linux, you may make symlinks to the Pandoc binaries in RStudio:
-#'   \url{https://github.com/rstudio/rmarkdown/blob/master/PANDOC.md}, or
+#'   \url{https://rmarkdown.rstudio.com/docs/articles/pandoc.html}, or
 #'   install \command{pandoc} and \command{pandoc-citeproc} separately.
 #'
 #'   When the \pkg{rmarkdown} package is not installed or not available, or
@@ -37,34 +37,36 @@ vweave = function(file, driver, syntax, encoding = 'UTF-8', quiet = FALSE, ...) 
   }
   opts_chunk$set(error = FALSE)  # should not hide errors
   knit_hooks$set(purl = hook_purl)  # write out code while weaving
-  (if (grepl('\\.[Rr]md$', file)) knit2html else if (grepl('\\.[Rr]rst$', file)) knit2pdf else knit)(
-    file, encoding = encoding, quiet = quiet, envir = globalenv()
+  (if (grepl('\\.[Rr]md$', file)) knit2html_v1 else if (grepl('\\.[Rr]rst$', file)) knit2pandoc else knit)(
+    file, encoding = encoding, quiet = quiet, envir = globalenv(), ...
   )
 }
 
 vtangle = function(file, ..., encoding = 'UTF-8', quiet = FALSE) {
   if (is_R_CMD_check()) {
-    file = sub_ext(file, 'R')
+    file = with_ext(file, 'R')
     file.create(file)
     return(file)
   }
-  purl(file, encoding = encoding, quiet = quiet)
+  purl(file, encoding = encoding, quiet = quiet, ...)
 }
 
 vweave_docco_linear = vweave
 body(vweave_docco_linear)[5L] = expression(knit2html(
   file, encoding = encoding, quiet = quiet, envir = globalenv(),
-  template = system.file('misc', 'docco-template.html', package = 'knitr')
+  template = system.file('misc', 'docco-template.html', package = 'knitr'),
+  ...
 ))
 
 vweave_docco_classic = vweave
 body(vweave_docco_classic)[5L] = expression(rocco(
-  file, encoding = encoding, quiet = quiet, envir = globalenv()
+  file, encoding = encoding, quiet = quiet, envir = globalenv(), ...
 ))
 
 vweave_rmarkdown = vweave
 body(vweave_rmarkdown)[5L] = expression(rmarkdown::render(
-  file, encoding = encoding, quiet = quiet, envir = globalenv()
+  file, encoding = encoding, quiet = quiet, envir = globalenv(),
+  output_dir = getwd(), ...
 ))
 
 # do not tangle R code from vignettes
@@ -78,7 +80,7 @@ untangle_weave = function(vig_list, eng) {
   weave
 }
 vtangle_empty = function(file, ...) {
-  unlink(sub_ext(file, 'R'))
+  unlink(with_ext(file, 'R'))
   return()
 }
 
@@ -91,8 +93,10 @@ register_vignette_engines = function(pkg) {
     if (pandoc_available()) {
       vweave_rmarkdown(...)
     } else {
-      if (!is_R_CMD_check())
-        warning('Pandoc (>= 1.12.3) and/or pandoc-citeproc is not available. Please install both.')
+      warning(
+        'Pandoc (>= 1.12.3) and/or pandoc-citeproc not available. ',
+        'Falling back to R Markdown v1.'
+      )
       vweave(...)
     }
   } else {
@@ -124,9 +128,9 @@ vig_engine = function(..., tangle = vtangle) {
 #' are likely to be identified as typos. This function is designed for the
 #' \code{filter} argument of \code{\link{aspell}()} to filter out code chunks
 #' and inline expressions.
-#' @param ifile the filename of the source document
-#' @param encoding the file encoding
-#' @return A chracter vector of the file content, excluding code chunks and
+#' @param ifile Filename of the source document.
+#' @param encoding Ignored (the file \code{ifile} must be encoded in UTF-8).
+#' @return A character vector of the file content, excluding code chunks and
 #'   inline expressions.
 #' @export
 #' @examples library(knitr)
@@ -139,8 +143,8 @@ vig_engine = function(..., tangle = vtangle) {
 #' # -H is the HTML mode
 #' utils::aspell(knitr_example('knitr-minimal.Rmd'), knit_filter, control = '-H -t')
 #' }}
-knit_filter = function(ifile, encoding = 'unknown') {
-  x = readLines(ifile, encoding = encoding, warn = FALSE)
+knit_filter = function(ifile, encoding = 'UTF-8') {
+  x = read_utf8(ifile)
   n = length(x); if (n == 0) return(x)
   p = detect_pattern(x, tolower(file_ext(ifile)))
   if (is.null(p)) return(x)
@@ -152,7 +156,7 @@ knit_filter = function(ifile, encoding = 'unknown') {
   if (m[1] == 0) m[1] = 2
   for (i in seq_len(n - 1)) if (m[i + 1] == 0) m[i + 1] = m[i]
   x[m == 1 | i2] = ''
-  x[m == 2] = gsub(p$inline.code, '', x[m == 2])
+  x[m == 2] = stringr::str_replace_all(x[m == 2], p$inline.code, '')
   structure(x, control = '-H -t')
 }
 

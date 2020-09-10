@@ -15,16 +15,19 @@ auto_exts = c(
 
   svglite = 'svg',
 
-  tikz = 'tikz'
+  ragg_png = 'png',
+
+  tikz = 'tex'
 )
 
 dev2ext = function(x) {
   res = auto_exts[x]
   if (any(idx <- is.na(res))) {
     for (i in x[idx]) check_dev(i)
-    stop('cannot find appropriate filename extensions for device ', x[idx],
-         "; please use chunk option 'fig.ext' (http://yihui.name/knitr/options)",
-         call. = FALSE)
+    stop2(
+      'cannot find appropriate filename extensions for device ', x[idx], '; ',
+      "please use chunk option 'fig.ext' (https://yihui.org/knitr/options)"
+    )
   }
   unname(res)
 }
@@ -55,13 +58,23 @@ tikz_dev = function(...) {
   tikzDevice::tikz(..., packages = c('\n\\nonstopmode\n', packages, .knitEnv$tikzPackages))
 }
 
+# a wrapper of the ragg::agg_png device
+ragg_png_dev = function(...) {
+  loadNamespace('ragg')
+  args = list(...)
+  # handle bg -> background gracefully
+  args$background = args$background %n% args$bg
+  args$bg = NULL
+  do.call(ragg::agg_png, args)
+}
+
 # save a recorded plot
 save_plot = function(plot, name, dev, width, height, ext, dpi, options) {
 
   path = paste(name, ext, sep = '.')
   # when cache=2 and plot file exists, just return the filename
   if (options$cache == 2 && cache$exists(options$hash, options$cache.lazy)) {
-    if (!file.exists(path)) {
+    if (in_base_dir(!file.exists(path))) {
       purge_cache(options)
       stop('cannot find ', path, '; the cache has been purged; please re-compile')
     }
@@ -107,6 +120,11 @@ save_plot = function(plot, name, dev, width, height, ext, dpi, options) {
 
     svglite = load_device('svglite', 'svglite'),
 
+    # similar to load_device(), but the `dpi` argument is named `res`
+    ragg_png = function(...) {
+      ragg_png_dev(..., res = dpi, units = 'in')
+    },
+
     tikz = function(...) {
       tikz_dev(..., sanitize = options$sanitize, standAlone = options$external)
     },
@@ -120,35 +138,43 @@ plot2dev = function(plot, name, dev, device, path, width, height, options) {
   dargs = get_dargs(options$dev.args, dev)
   # re-plot the recorded plot to an off-screen device
   do.call(device, c(list(path, width = width, height = height), dargs))
-  showtext(options$fig.showtext)  # showtext support
+  showtext(options)  # maybe begin showtext and set options
   print(plot)
   dev.off()
 
-  # compile tikz to pdf
-  if (dev == 'tikz' && options$external) {
-    unlink(pdf.plot <- paste0(name, '.pdf'))
-    owd = setwd(dirname(path))
-    # add old wd to TEXINPUTS (see #188)
-    oti = Sys.getenv('TEXINPUTS'); on.exit(Sys.setenv(TEXINPUTS = oti))
-    Sys.setenv(TEXINPUTS = paste(owd, oti, sep = ':'))
-    latex = switch(
-      getOption('tikzDefaultEngine'),
-      pdftex = getOption('tikzLatex'),
-      xetex  = getOption('tikzXelatex'),
-      luatex = getOption('tikzLualatex'),
-      stop('a LaTeX engine must be specified for tikzDevice', call. = FALSE)
-    )
-    system2(latex, shQuote(basename(path)), stdout = NULL)
-    setwd(owd)
-    if (!file.exists(pdf.plot)) {
-      if (file.exists(log <- paste(name, 'log', sep = '.')))
-        message(paste(readLines(log), collapse = '\n'))
-      stop('failed to compile ', path, ' to PDF', call. = FALSE)
-    }
-    path = pdf.plot
+  # Cairo::CairoPS always adds the extension .ps, even if you have specified an
+  # extension like .eps (https://github.com/yihui/knitr/issues/1364)
+  if (dev == 'CairoPS') {
+    path2 = paste0(path, '.ps')
+    if (file.exists(path2)) file.rename(path2, path)
   }
 
-  fig_process(options$fig.process, path)
+  # compile tikz to pdf
+  if (dev == 'tikz') {
+    patch_tikz_tex(path)
+    if (options$external) path = tinytex::latexmk(path, getOption('tikzDefaultEngine'))
+  }
+
+  fig_process(options$fig.process, path, options)
+}
+
+# the tikz plot may contain raster legends, in which case we need to adjust the
+# paths of these PNG files: https://stackoverflow.com/a/58410965/559676
+patch_tikz_tex = function(path) {
+  d = dirname(path)
+  p = list.files(d, r <- '_ras[0-9]+[.]png$')
+  b = sans_ext(basename(path)); bs = sub(r, '', p)
+  # for foo.tex, there must be foo_ras[N].png, otherwise no need to patch foo.tex
+  if (!(b %in% bs)) return()
+  x = read_utf8(path)
+  r = '^(\\s*\\\\pgfimage\\[.+?]\\{)(.+?_ras[0-9]+}};\\s*)$'
+  i = grep(r, x)
+  i = i[grep(b, x[i], fixed = TRUE)]
+  x1 = sub(r, '\\1', x[i])
+  x2 = sub(r, '\\2', x[i])
+  if (is_windows()) d = gsub('\\\\', '/', d)
+  x[i] = paste0(x1, d, '/', x2)
+  write_utf8(x, path)
 }
 
 # filter the dev.args option
@@ -252,7 +278,7 @@ remove_plot = function(list, keep.high = TRUE) {
 # replace the content of the recorded plot with MD5 digests so that merge_plot()
 # will still work, and this will also save disk space for the case of cache=2
 digest_plot = function(x, level = 1) {
-  if (!is.list(x) || level >= 3) return(digest::digest(x))
+  if (!is.list(x) || level >= 3) return(digest(x))
   lapply(x, digest_plot, level = level + 1)
 }
 
@@ -261,9 +287,10 @@ pdf_null = function(width = 7, height = 7, ...) {
   grDevices::pdf(NULL, width, height, ...)
 }
 
-fig_process = function(FUN, path) {
+fig_process = function(FUN, path, options) {
   if (is.function(FUN)) {
-    path2 = FUN(path)
+    ARG = intersect(c("options", names(options)), names(formals(FUN)))
+    path2 = do.call(FUN, c(path, c(options = list(options), options)[ARG]))
     if (!is.character(path2) || length(path2) != 1L)
       stop("'fig.process' must be a function that returns a character string")
     path = path2
@@ -273,49 +300,49 @@ fig_process = function(FUN, path) {
 
 #' Crop a plot (remove the edges) using PDFCrop or ImageMagick
 #'
-#' The command \command{pdfcrop x x} is executed on a PDF plot file, and
-#' \command{convert x -trim x} is executed for other types of plot files, where
-#' \code{x} is the plot filename.
+#' The program \command{pdfcrop} (often shipped with a LaTeX distribution) is
+#' executed on a PDF plot file, and
+#' \code{magick::\link[magick:transform]{image_trim}()} is executed for other
+#' types of plot files.
 #'
-#' The utility \command{pdfcrop} is often shipped with a LaTeX distribution, and
-#' \command{convert} is a command in ImageMagick (Windows users may have to put
-#' the bin path of ImageMagick into the \var{PATH} variable).
-#' @param x the plot filename
-#' @param quiet whether to suppress standard output from the command line
-#'   utility
+#' The program \command{pdfcrop} can crop the extra white margins when the plot
+#' format is PDF, to make better use of the space in the output document,
+#' otherwise we often have to struggle with \code{graphics::\link{par}()} to set
+#' appropriate margins. Note \command{pdfcrop} often comes with a LaTeX
+#' distribution such as TinyTeX, MiKTeX, or TeX Live, and you may not need to
+#' install it separately (use \code{Sys.which('pdfcrop')} to check it; if it not
+#' empty, you are able to use it). Note that \command{pdfcrop} depends on
+#' GhostScript. You can check if GhostScript is installed via
+#' \code{tools::find_gs_cmd()}.
+#' @param x Filename of the plot.
+#' @param quiet Whether to suppress standard output from the command.
 #' @export
-#' @references PDFCrop: \url{http://pdfcrop.sourceforge.net}; the
-#'   \command{convert} command in ImageMagick:
-#'   \url{http://www.imagemagick.org/script/convert.php}
+#' @references PDFCrop: \url{https://www.ctan.org/pkg/pdfcrop}. If you use
+#'   TinyTeX, you may install \command{pdfcrop} with
+#'   \code{tinytex::tlmgr_install('pdfcrop')}.
 #' @return The original filename.
-plot_crop = function(x, quiet = !opts_knit$get('progress')) {
-  ext = tolower(file_ext(x))
-  if (ext == 'pdf') {
-    if (!has_utility('pdfcrop')) return(x)
-  } else if (!has_utility('convert', 'ImageMagick')) return(x)
+plot_crop = function(x, quiet = TRUE) {
+  is_pdf = grepl('[.]pdf$', x, ignore.case = TRUE)
+  x2 = x
+  x = path.expand(x)
+  if (is_pdf && !has_utility('pdfcrop') && !has_utility('ghostscript')) return(x2)
 
   if (!quiet) message('cropping ', x)
-  x = shQuote(x)
-  if (ext == 'pdf') {
-    cmd = 'pdfcrop'
-    args = c(x, x)
-  } else {
-    cmd = 'convert'
-    args = c(x, '-trim', x)
-  }
-  # see this post for why use shell() on Windoz:
-  # http://comments.gmane.org/gmane.comp.lang.r.devel/38113
-  if (is_windows()) {
-    shell(paste(c(cmd, args), collapse = ' '))  # no way to quiet cmd output on Windoz
-  } else {
-    system2(cmd, args = args, stdout = if (quiet) FALSE else "")
-  }
-  x
+  if (is_pdf) {
+    system2('pdfcrop', shQuote(c(x, x)), stdout = if (quiet) FALSE else "")
+  } else if (loadable('magick')) {
+    img = magick::image_read(x)
+    magick::image_write(magick::image_trim(img), x)
+  } else message(
+    'The magick package is required to crop "', x2, '" but not available.'
+  )
+  x2
 }
 
-# a wrapper of showtext::showtext.begin()
-showtext = function(show) {
-  if (isTRUE(show)) getFromNamespace('showtext.begin', 'showtext')()
+showtext = function(options) {
+  if (!isTRUE(options$fig.showtext)) return()
+  showtext::showtext_opts(dpi = options$dpi)
+  showtext::showtext_begin()
 }
 
 # handle some special cases of par()
@@ -328,8 +355,15 @@ par2 = function(x) {
     # do this before the rest of pars because setting mfrow/mfcol will reset cex
     par(mfrow = x$mfrow)
     x$mfrow = x$mfcol = NULL
+    # do not restore mfg (#1215); this is unlikely to make sense, e.g. for
+    # par(mfrow = c(1, 2)), mfg will be c(1, 2, 1, 2) when the second plot is
+    # completed, but when the user generate a new plot, it should typically be
+    # drawn at (1, 1) instead of (1, 2)
+    x$mfg = NULL
   }
-  x$usr = NULL  # you are unlikely to want to reset usr
+  # you are unlikely to want to reset these pars
+  x$fig = x$fin = x$pin = x$plt = x$usr = NULL
+  x$ask = NULL  # does not make sense for typical non-interactive R sessions
   par(x)
 }
 
@@ -344,16 +378,18 @@ par2 = function(x) {
 #' Markdown syntax, to embed an external image. Chunk options related to
 #' graphics output that work for normal R plots also work for these images, such
 #' as \code{out.width} and \code{out.height}.
-#' @param path a character vector of image paths
-#' @param auto_pdf whether to use PDF images automatically when the output
-#'   format is LaTeX, e.g. \file{foo/bar.png} will be replaced by
-#'   \file{foo/bar.pdf} if the latter exists; this can be useful since normally
-#'   PDF images are of higher qualities than raster images like PNG when the
-#'   output is LaTeX/PDF
-#' @param dpi the DPI (dots per inch) value to be used to calculate the output
-#'   width (in inches) of the images from the actual width (in pixels) divided
-#'   by \code{dpi}; if not provided, the chunk option \code{dpi} is used; if
-#'   \code{NA}, the output width will not be calculated
+#' @param path A character vector of image paths.
+#' @param auto_pdf Whether to use PDF images automatically when the output
+#'   format is LaTeX. If \code{TRUE}, then e.g. \file{foo/bar.png} will be
+#'   replaced by \file{foo/bar.pdf} if the latter exists. This can be useful
+#'   since normally PDF images are of higher quality than raster images like
+#'   PNG, when the output is LaTeX/PDF.
+#' @param dpi DPI (dots per inch) value. Used to calculate the output width (in
+#'   inches) of the images. This will be their actual width in pixels, divided
+#'   by \code{dpi}. If not provided, the chunk option \code{dpi} is used; if
+#'   \code{NA}, the output width will not be calculated.
+#' @param error Whether to signal an error if any files specified in the
+#'   \code{path} argument do not exist and are not web resources.
 #' @note This function is supposed to be used in R code chunks or inline R code
 #'   expressions. You are recommended to use forward slashes (\verb{/}) as path
 #'   separators instead of backslashes in the image paths.
@@ -366,12 +402,19 @@ par2 = function(x) {
 #'   with special internal S3 classes so that \pkg{knitr} will convert the file
 #'   paths to proper output code according to the output format.
 #' @export
-include_graphics = function(path, auto_pdf = TRUE, dpi = NULL) {
+include_graphics = function(
+  path, auto_pdf = getOption('knitr.graphics.auto_pdf', FALSE), dpi = NULL,
+  error = getOption('knitr.graphics.error', TRUE)
+) {
+  path = native_encode(path)  # https://d.cosx.org/d/420524
   if (auto_pdf && is_latex_output()) {
-    path2 = sub_ext(path, 'pdf')
+    path2 = with_ext(path, 'pdf')
     i = file.exists(path2)
     path[i] = path2[i]
   }
+  if (error && length(p <- path[!is_web_path(path) & !file.exists(path)])) stop(
+    'Cannot find the file(s): ', paste0('"', p, '"', collapse = '; ')
+  )
   structure(path, class = c('knit_image_paths', 'knit_asis'), dpi = dpi)
 }
 
@@ -406,8 +449,8 @@ raster_dpi_width = function(path, dpi) {
 #' the output. \code{include_app()} takes the URL of a Shiny app and adds
 #' \samp{?showcase=0} to it (to disable the showcase mode), then passes the URL
 #' to \code{include_url()}.
-#' @param url a character string of a URL
-#' @param height the height of the iframe
+#' @param url Character string containing a URL.
+#' @param height Character string with the height of the iframe.
 #' @return An R object with a special class that \pkg{knitr} recognizes
 #'   internally to generate the iframe or screenshot.
 #' @seealso \code{\link{include_graphics}}
@@ -443,13 +486,23 @@ need_screenshot = function(x, ...) {
   i3 = inherits(x, 'knit_embed_url')
   # not R Markdown v2, always screenshot htmlwidgets and shiny apps
   if (length(fmt) == 0 || force) return(i1 || i2 || i3)
-  html_format = fmt %in% c('html', 'html5', 'revealjs', 's5', 'slideous', 'slidy')
-  ((i1 || i3) && !html_format) || (i2 && !(html_format && runtime_shiny()))
+  html_format = fmt %in% c('html', 'html4', 'html5', 'revealjs', 's5', 'slideous', 'slidy')
+  res = ((i1 || i3) && !html_format) || (i2 && !(html_format && runtime_shiny()))
+  res && webshot_available()
 }
 
 runtime_shiny = function() {
   identical(opts_knit$get('rmarkdown.runtime'), 'shiny')
 }
+
+webshot_available = local({
+  res = NULL  # cache the availablity of webshot/PhantomJS
+  function() {
+    if (is.null(res))
+      res <<- loadable('webshot') && !is.null(getFromNamespace('find_phantom', 'webshot')())
+    res
+  }
+})
 
 html_screenshot = function(x, options = opts_current$get(), ...) {
   i1 = inherits(x, 'htmlwidget')
@@ -465,12 +518,9 @@ html_screenshot = function(x, options = opts_current$get(), ...) {
     return(structure(list(file = shots[i]), class = 'html_screenshot'))
   }
 
-  if (!loadable('webshot')) stop(
-    'Please install the webshot package ',
-    '(if not on CRAN, try devtools::install_github("wch/webshot"))'
-  )
-
-  ext = switch(options$dev, pdf = '.pdf', jpeg = '.jpeg', '.png')
+  ext = if (length(options$dev)) {
+    switch(options$dev[1], pdf = '.pdf', jpeg = '.jpeg', '.png')
+  } else '.png'
   wargs = options$screenshot.opts %n% list()
   if (is.null(wargs$vwidth)) wargs$vwidth = options$out.width.px
   if (is.null(wargs$vheight)) wargs$vheight = options$out.height.px
@@ -480,14 +530,14 @@ html_screenshot = function(x, options = opts_current$get(), ...) {
   f = in_dir(d, {
     if (i1 || i3) {
       if (i1) {
-        f1 = basename(tempfile('widget', '.', '.html'))
+        f1 = wd_tempfile('widget', '.html')
         save_widget(x, f1, FALSE, options = options)
       } else f1 = x$url
-      f2 = tempfile('webshot', '.', ext)
+      f2 = wd_tempfile('webshot', ext)
       do.call(webshot::webshot, c(list(f1, f2), wargs))
       normalizePath(f2)
     } else if (i2) {
-      f = tempfile('webshot', '.', ext)
+      f = wd_tempfile('webshot', ext)
       do.call(webshot::appshot, c(list(x, f), wargs))
       normalizePath(f)
     }

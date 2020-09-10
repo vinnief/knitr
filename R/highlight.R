@@ -18,8 +18,8 @@ hilight_source = function(x, format, options) {
   } else if (options$prompt) {
     # if you did not reformat or evaluate the code, I have to figure out which
     # lines belong to one complete expression first (#779)
-    if (options$engine == 'R' && !options$tidy && isFALSE(options$eval))
-      x = vapply(highr:::group_src(x), paste, character(1), collapse = '\n')
+    if (options$engine == 'R' && isFALSE(options$tidy) && isFALSE(options$eval))
+      x = vapply(highr:::group_src(x), one_string, character(1))
     line_prompt(x)
   } else x
 }
@@ -77,7 +77,7 @@ css.parse.color = function(txt, default = '#000000') {
 is.hex = function(x) grepl('^#[0-9a-f]{6}$', x)
 
 # minimal css parser
-css.parser = function(file, lines = readLines(file)) {
+css.parser = function(file, lines = read_utf8(file)) {
 
   rx = '^\\.(.*?) *\\{.*$'
   dec.lines = grep(rx, lines)
@@ -135,7 +135,8 @@ styler_assistant_latex = function(x) {
     }
     sprintf('%s#1%s', start, end)
   })
-  sprintf('\\newcommand{\\hl%s}[1]{%s}%%', names(x), styles)
+  res = sprintf('\\newcommand{\\hl%s}[1]{%s}%%', names(x), styles)
+  c(res, '\\let\\hlipl\\hlkwb')
 }
 
 col2latexrgb = function(hex) {

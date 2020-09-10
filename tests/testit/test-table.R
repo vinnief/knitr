@@ -19,6 +19,11 @@ assert(
 )
 
 assert(
+  'kable() align with strings correctly',
+  identical(kable2(m, align = c('c', 'r')), kable2(m, align = 'cr'))
+)
+
+assert(
   'kable() works on character data frames',
   identical(kable2(data.frame(x = 'a')), c('|x  |', '|:--|', '|a  |'))
 )
@@ -28,11 +33,8 @@ assert(
   identical(kable2(data.frame(x = c(NA, FALSE))), c('|x     |', '|:-----|', '|NA    |', '|FALSE |'))
 )
 
-assert(
-  'kable() does not add extra spaces to character columns',
-  identical(
-    kable2(data.frame(x = c(1.2, 4.87), y = c('fooooo', 'bar')), 'latex'),
-    '
+assert('kable() does not add extra spaces to character columns', {
+  kable2(data.frame(x = c(1.2, 4.87), y = c('fooooo', 'bar')), 'latex') %==% '
 \\begin{tabular}{r|l}
 \\hline
 x & y\\\\
@@ -42,8 +44,7 @@ x & y\\\\
 4.87 & bar\\\\
 \\hline
 \\end{tabular}'
-  )
-)
+})
 
 assert(
   'kable() escapes LaTeX special characters by default',
@@ -78,6 +79,21 @@ x & col_name\\\\
 \\end{tabular}'
   )
 )
+
+assert('kable(format = "latex", linesep = ...) works', {
+  kable2(data.frame(x = 1:4), 'latex', linesep  = c("", "", "\\midrule")) %==% "
+\\begin{tabular}{r}
+\\hline
+x\\\\
+\\hline
+1\\\\
+2\\\\
+3\\\\
+\\midrule
+4\\\\
+\\hline
+\\end{tabular}"
+})
 
 assert(
   'kable() escapes HTML special characters by default',
@@ -133,9 +149,23 @@ for (f in c('pandoc', 'html', 'latex', 'rst')) {
 
 colnames(x2) = 'a'
 assert(
-  'kable(, "markdown") works for a 0 zero 1 column matrix',
+  'kable(, "markdown") works for a 0 row 1 column matrix',
   identical(kable2(x2, 'markdown'), c('|a  |', '|:--|'))
 )
+
+assert(
+  'kable(, "pandoc") works for a 0 row data.frame',
+  identical(
+    kable2(data.frame(x = character(0), y = integer(0)), 'pandoc'),
+    c('|x  |  y|', '|:--|--:|')
+  )
+)
+
+assert('kable(, "pandoc", caption = "Table Caption") works for a 1-column matrix', {
+  x4 = matrix(1:2, ncol = 1, dimnames = list(NULL, 'a'))
+  kable2(x4, 'pandoc', caption = 'Table Caption') %==%
+    c('Table: Table Caption', '', '|  a|', '|--:|', '|  1|', '|  2|')
+})
 
 assert(
   'kable() works on an irregular matrix',
@@ -150,3 +180,28 @@ assert(
   !has_rownames(matrix(1:4, 2)), !has_rownames(iris), has_rownames(mtcars),
   !has_rownames(as.data.frame(matrix(nrow = 0, ncol = 3)))
 )
+
+op = options(knitr.kable.NA = '')
+assert(
+  'kable() can display NA as emtpy strings',
+  kable2(matrix(c(1, NA, 3, 4), nrow = 2), col.names = c('a', 'b')) %==%
+    c('|  a|  b|', '|--:|--:|', '|  1|  3|', '|   |  4|')
+)
+options(op)
+
+assert('kable() can apply formatting to custom objects', {
+    d = tibble::tibble(x = structure(
+      'print_me', .to_upper = TRUE, class = 'make_upper'
+    ))
+    
+    format.make_upper = function(x, ...) {
+      xout = unclass(x)
+      if (isTRUE(attr(x, '.to_upper'))) {
+        xout = toupper(xout)
+      }
+      as.character(xout)
+    }
+    registerS3method('format', 'make_upper', format.make_upper, environment(format))
+    
+    (kable2(d) %==% c('|x        |', '|:--------|', '|PRINT_ME |'))
+})

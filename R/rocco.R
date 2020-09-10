@@ -38,14 +38,16 @@ docAdjust = function(x) {
 #' bidirectional resize cursor; drag the cursor to resize the two columns. Press
 #' the key \code{t} to hide the code column (show the text column only), and
 #' press again to hide the text column (show code).
-#' @param input path of the input R Markdown file
-#' @param ... arguments to be passed to \code{\link{knit2html}}
+#' @param input Path of the input R Markdown file.
+#' @param ... Arguments to be passed to \code{\link{knit2html}}
 #' @return An HTML file is written, and its name is returned.
 #' @author Weicheng Zhu and Yihui Xie
 #' @references The Docco package by Jeremy Ashkenas:
 #'   \url{https://github.com/jashkenas/docco}
 #' @export
-#' @examples rocco_view=function(input) {if (!file.exists(input)) return()
+#' @examples rocco_view=function(input) {
+#' owd = setwd(tempdir()); on.exit(setwd(owd))
+#' if (!file.exists(input)) return()
 #' o=rocco(input, header='', quiet=TRUE)
 #' if (interactive()) browseURL(o)}
 #' # knit these two vignettes using the docco style
@@ -57,10 +59,10 @@ rocco = function(input, ...) {
     stylesheet = system.file('misc', 'docco-classic.css', package = 'knitr'),
     template = system.file('misc', 'docco-classic.html', package = 'knitr')
   )
-  txt = readLines(out)
+  txt = read_utf8(out)
   i1 = min(grep('<!--table start-->$', txt))
   i2 = max(grep('<!--table end-->$', txt))
-  x = paste(txt[seq(i1 + 1, i2 - 1)], collapse = '\n')
+  x = one_string(txt[seq(i1 + 1, i2 - 1)])
   x = gsub('</pre>\\s*<pre>', '<!--ReDuNdAnTpRe-->', x)  # merge pre blocks
   m = gregexpr('<pre><code( class="[[:alnum:]]+")?>(.|\n)*?</code></pre>', x)
   if (m[[1]][1] == -1) stop('No code blocks in HTML output')
@@ -84,6 +86,6 @@ rocco = function(input, ...) {
   }
 
   html = c(txt[1:i1], paste0(doc, code, collapse = ''), txt[i2:length(txt)])
-  writeLines(html, out)
+  write_utf8(html, out)
   invisible(out)
 }
